@@ -1,66 +1,64 @@
-const express = require('express')
-const path = require('path')
-const bodyParser = require('body-parser')
+const express = require('express');
+const path = require('path');
+const bodyParser = require('body-parser');
 const session = require('express-session');
-const app = express()
+const app = express();
 const cors = require('cors');
 app.use(
-    cors({
-      origin: true,
-      credentials: true,
-      optionsSuccessStatus: 200
-  }))
+  cors({
+    origin: true,
+    credentials: true,
+    optionsSuccessStatus: 200,
+  })
+);
 app.use(express.urlencoded({ extended: true }));
 const port = process.env.PORT || 8000;
 const oneDay = 1000 * 60 * 60 * 24;
-var admin = require("firebase-admin");
-let serviceAccount
-if (process.env.GOOGLE_CREDENTIALS != null){
-    serviceAccount = JSON.parse(process.env.GOOGLE_CREDENTIALS)
-}
-else {
-    serviceAccount = require("./chat-db-394da-firebase-adminsdk-fwe1g-b78b86acda.json");
+var admin = require('firebase-admin');
+let serviceAccount;
+if (process.env.GOOGLE_CREDENTIALS != null) {
+  serviceAccount = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+} else {
+  serviceAccount = require('./chat-db-394da-firebase-adminsdk-fwe1g-b78b86acda.json');
 }
 
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
+  credential: admin.credential.cert(serviceAccount),
 });
 const db = admin.firestore();
-const users = db.collection('users')
-const messages = db.collection('messages')
-const conversations = db.collection('conversations')
-//app.use(express.static(path.join(__dirname +  "/public")))
-/*app.get('*', (req, res) => {
-  res,sendFile(path.join(__dirname, '/public', 'index.html'))
-})*/
+const users = db.collection('users');
+const messages = db.collection('messages');
+const conversations = db.collection('conversations');
+
 app.get('/', async function (req, res) {
-    const items = await users.get();
-    let data = {itemData : items.docs}
-    res.json(data)
-    console.log(data)
-})
+  const items = await users.get();
+  let data = { itemData: items.docs };
+  res.json(data);
+  console.log(data);
+});
+
 app.use(
   session({
     secret: 'secret',
     resave: true,
     cookie: { maxAge: oneDay },
     saveUninitialized: true,
-    name: (req) => req.session.cookieName // Use the dynamically generated cookie name
+    name: 'sessionID', // Set a unique name for the session cookie
   })
 );
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-let un; // username
-let uid; // userid
-
 app.post('/logout', (req, res) => {
-  req.session.loggedin = false;
-  req.session.username = '';
-  un = '';
-  uid = '';
-  res.sendStatus(200);
+  req.session.destroy((err) => {
+    if (err) {
+      console.log(err);
+      res.sendStatus(500);
+    } else {
+      res.sendStatus(200);
+    }
+  });
 });
 
 app.post('/auth', async (req, res) => {
@@ -83,16 +81,26 @@ app.post('/auth', async (req, res) => {
   if (results.length === 0) {
     res.json([{ username: '' }]); // Returning an empty JSON object
   } else {
-    req.session.username = results[0].username;
-    req.session.uid = userId;
-    un = req.session.username;
-    uid = req.session.uid;
+    const sessionId = req.session.id; // Generate a unique session ID for each user
+    req.session.regenerate((err) => {
+      if (err) {
+        console.log(err);
+        res.sendStatus(500);
+      } else {
+        req.session.username = results[0].username;
+        req.session.uid = userId;
+        console.log('User ID:', req.session.uid); // Logging the uid value after it's set
 
-    console.log('user id', uid); // Logging the uid value after it's set
-
-    res.json(results);
+        res.json(results);
+      }
+    });
   }
 });
+
+app.listen(port, () => {
+  console.log(`Server is running on port ${port}`);
+});
+
 
 app.post("/logout", (req, res) => {
   req.session.loggedin = false
