@@ -97,10 +97,6 @@ app.post('/auth', async (req, res) => {
   }
 });
 
-app.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
-});
-
 
 app.post("/logout", (req, res) => {
   req.session.loggedin = false
@@ -111,8 +107,8 @@ app.post("/logout", (req, res) => {
 
 app.get("/confirm", (req, res) => {
   if (req) {
-  res.send(un);
-      console.log("username", un)
+  res.send( req.session.username);
+      console.log("username",  req.session.username)
 } else {
   res.send('Please login to view this page!');
 }
@@ -122,8 +118,8 @@ res.end();
 })
 app.get("/fetchid", (req, res) => {
   if (req) {
-  res.send(uid);
-      console.log("user id", uid)
+  res.send(req.session.uid);
+      console.log("user id", req.session.uid)
 } else {
   res.send('Please login to view this page!');
 }
@@ -232,7 +228,7 @@ app.put('/updateuser', async (req, res) => {
     console.error('Error updating user:', error);
     res.status(500).json({ message: 'Failed to update user' });
   }
-  un = username;
+  un =  req.session.username;
 });
 
 app.get('/search', async (req, res) => {
