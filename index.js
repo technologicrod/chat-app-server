@@ -1,34 +1,73 @@
-const express = require('express');
-const path = require('path');
-const bodyParser = require('body-parser');
-const session = require('express-session');
+const express = require('express')
+const path = require('path')
+const bodyParser = require('body-parser')
+//const session = require('express-session');
+const session = require('cookie-session');
 const app = express();
 const cors = require('cors');
+
 app.use(
   cors({
     origin: true,
     credentials: true,
-    optionsSuccessStatus: 200,
+    optionsSuccessStatus: 200
   })
 );
+
 app.use(express.urlencoded({ extended: true }));
+
 const port = process.env.PORT || 8000;
 const oneDay = 1000 * 60 * 60 * 24;
-var admin = require('firebase-admin');
+const admin = require("firebase-admin");
+
 let serviceAccount;
+
 if (process.env.GOOGLE_CREDENTIALS != null) {
   serviceAccount = JSON.parse(process.env.GOOGLE_CREDENTIALS);
 } else {
-  serviceAccount = require('./chat-db-394da-firebase-adminsdk-fwe1g-b78b86acda.json');
+  serviceAccount = require("./chat-db-394da-firebase-adminsdk-fwe1g-b78b86acda.json");
 }
 
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
+  credential: admin.credential.cert(serviceAccount)
 });
+
 const db = admin.firestore();
 const users = db.collection('users');
 const messages = db.collection('messages');
 const conversations = db.collection('conversations');
+
+app.use(
+  session({
+    secret: 'secret',
+    resave: true,
+    saveUninitialized: true,
+    cookie: {
+      maxAge: oneDay,
+      secure: true,
+      sameSite: 'none',
+      path: '/',
+      httpOnly: true,
+      domain: 'your-domain.com', // Replace with your domain
+      encode: String
+    },
+    genid: (req) => {
+      // Generate a unique session ID based on user-agent for different browsers/incognito
+      const browserSessionId = req.headers['user-agent'];
+      const incognito = req.headers['sec-fetch-mode'] === 'navigate';
+
+      return incognito ? `incognito_${browserSessionId}` : browserSessionId;
+    }
+  })
+);
+
+// Middleware to generate a unique session ID for each browser session
+app.use((req, res, next) => {
+  req.session.browserSessionId = req.headers['user-agent'];
+  next();
+});
+
+app.use(express.json());
 
 app.get('/', async function (req, res) {
   const items = await users.get();
@@ -37,28 +76,15 @@ app.get('/', async function (req, res) {
   console.log(data);
 });
 
-app.use(
-  session({
-    secret: 'secret',
-    resave: true,
-    cookie: { maxAge: oneDay },
-    saveUninitialized: true,
-    name: 'sessionID', // Set a unique name for the session cookie
-  })
-);
-
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+let un; // username
+let uid; // userid
 
 app.post('/logout', (req, res) => {
-  req.session.destroy((err) => {
-    if (err) {
-      console.log(err);
-      res.sendStatus(500);
-    } else {
-      res.sendStatus(200);
-    }
-  });
+  req.session.loggedin = false;
+  req.session.username = '';
+  un = '';
+  uid = '';
+  res.sendStatus(200);
 });
 
 app.post('/auth', async (req, res) => {
@@ -81,34 +107,21 @@ app.post('/auth', async (req, res) => {
   if (results.length === 0) {
     res.json([{ username: '' }]); // Returning an empty JSON object
   } else {
-    const sessionId = req.session.id; // Generate a unique session ID for each user
-    req.session.regenerate((err) => {
-      if (err) {
-        console.log(err);
-        res.sendStatus(500);
-      } else {
-        req.session.username = results[0].username;
-        req.session.uid = userId;
-        console.log('User ID:', req.session.uid); // Logging the uid value after it's set
+    req.session.username = results[0].username;
+    req.session.uid = userId;
+    un = req.session.username;
+    uid = req.session.uid;
 
-        res.json(results);
-      }
-    });
+    console.log('user id', uid); // Logging the uid value after it's set
+
+    res.json(results);
   }
 });
 
-
-app.post("/logout", (req, res) => {
-  req.session.loggedin = false
-  req.session.username = ""
-  un = ""
-  uid = ""
-})
-
 app.get("/confirm", (req, res) => {
   if (req) {
-  res.send( req.session.username);
-      console.log("username",  req.session.username)
+  res.send(un);
+      console.log("username", un)
 } else {
   res.send('Please login to view this page!');
 }
@@ -118,8 +131,8 @@ res.end();
 })
 app.get("/fetchid", (req, res) => {
   if (req) {
-  res.send(req.session.uid);
-      console.log("user id", req.session.uid)
+  res.send(uid);
+      console.log("user id", uid)
 } else {
   res.send('Please login to view this page!');
 }
@@ -228,7 +241,7 @@ app.put('/updateuser', async (req, res) => {
     console.error('Error updating user:', error);
     res.status(500).json({ message: 'Failed to update user' });
   }
-  un =  req.session.username;
+  un = username;
 });
 
 app.get('/search', async (req, res) => {
