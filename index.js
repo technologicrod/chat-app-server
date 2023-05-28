@@ -1,56 +1,80 @@
 const express = require('express')
 const path = require('path')
 const bodyParser = require('body-parser')
-const session = require('express-session');
-const app = express()
+//const session = require('express-session');
+const session = require('cookie-session');
+const app = express();
 const cors = require('cors');
+
 app.use(
-    cors({
-      origin: true,
-      credentials: true,
-      optionsSuccessStatus: 200
-  }))
+  cors({
+    origin: true,
+    credentials: true,
+    optionsSuccessStatus: 200
+  })
+);
+
 app.use(express.urlencoded({ extended: true }));
+
 const port = process.env.PORT || 8000;
 const oneDay = 1000 * 60 * 60 * 24;
-var admin = require("firebase-admin");
-let serviceAccount
-if (process.env.GOOGLE_CREDENTIALS != null){
-    serviceAccount = JSON.parse(process.env.GOOGLE_CREDENTIALS)
-}
-else {
-    serviceAccount = require("./chat-db-394da-firebase-adminsdk-fwe1g-b78b86acda.json");
+const admin = require("firebase-admin");
+
+let serviceAccount;
+
+if (process.env.GOOGLE_CREDENTIALS != null) {
+  serviceAccount = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+} else {
+  serviceAccount = require("./chat-db-394da-firebase-adminsdk-fwe1g-b78b86acda.json");
 }
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
 });
+
 const db = admin.firestore();
-const users = db.collection('users')
-const messages = db.collection('messages')
-const conversations = db.collection('conversations')
-//app.use(express.static(path.join(__dirname +  "/public")))
-/*app.get('*', (req, res) => {
-  res,sendFile(path.join(__dirname, '/public', 'index.html'))
-})*/
-app.get('/', async function (req, res) {
-    const items = await users.get();
-    let data = {itemData : items.docs}
-    res.json(data)
-    console.log(data)
-})
+const users = db.collection('users');
+const messages = db.collection('messages');
+const conversations = db.collection('conversations');
+
 app.use(
   session({
     secret: 'secret',
     resave: true,
-    cookie: { maxAge: oneDay },
     saveUninitialized: true,
-    name: (req) => req.session.cookieName // Use the dynamically generated cookie name
+    cookie: {
+      maxAge: oneDay,
+      secure: true,
+      sameSite: 'none',
+      path: '/',
+      httpOnly: true,
+      domain: 'your-domain.com', // Replace with your domain
+      encode: String
+    },
+    genid: (req) => {
+      // Generate a unique session ID based on user-agent for different browsers/incognito
+      const browserSessionId = req.headers['user-agent'];
+      const incognito = req.headers['sec-fetch-mode'] === 'navigate';
+
+      return incognito ? `incognito_${browserSessionId}` : browserSessionId;
+    }
   })
 );
 
+// Middleware to generate a unique session ID for each browser session
+app.use((req, res, next) => {
+  req.session.browserSessionId = req.headers['user-agent'];
+  next();
+});
+
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+
+app.get('/', async function (req, res) {
+  const items = await users.get();
+  let data = { itemData: items.docs };
+  res.json(data);
+  console.log(data);
+});
 
 let un; // username
 let uid; // userid
@@ -58,6 +82,7 @@ let uid; // userid
 app.post('/logout', (req, res) => {
   req.session.loggedin = false;
   req.session.username = '';
+  req.session.uid = ''
   un = '';
   uid = '';
   res.sendStatus(200);
@@ -93,13 +118,6 @@ app.post('/auth', async (req, res) => {
     res.json(results);
   }
 });
-
-app.post("/logout", (req, res) => {
-  req.session.loggedin = false
-  req.session.username = ""
-  un = ""
-  uid = ""
-})
 
 app.get("/confirm", (req, res) => {
   if (req) {
