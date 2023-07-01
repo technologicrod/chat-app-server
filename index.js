@@ -4,6 +4,8 @@ const bodyParser = require('body-parser')
 const session = require('express-session');
 const app = express()
 const cors = require('cors');
+const multer = require('multer');
+const upload = multer({storage:multer.memoryStorage()});
 app.use(
     cors({
       origin: true,
@@ -29,15 +31,12 @@ const db = admin.firestore();
 const users = db.collection('users')
 const messages = db.collection('messages')
 const conversations = db.collection('conversations')
-//app.use(express.static(path.join(__dirname +  "/public")))
-/*app.get('*', (req, res) => {
-  res,sendFile(path.join(__dirname, '/public', 'index.html'))
-})*/
+const logs = db.collection('logs')
 app.get('/', async function (req, res) {
     const items = await users.get();
     let data = {itemData : items.docs}
     res.json(data)
-    console.log(data)
+    //console.log(data)
 })
 app.use(
   session({
@@ -56,13 +55,29 @@ let un; // username
 let uid; // userid
 
 app.post('/logout', (req, res) => {
-  req.session.loggedin = false;
-  req.session.username = '';
-  req.session.uid = '';
-  un = '';
-  uid = '';
-  res.sendStatus(200);
+  const rdata = req.body.rdata;
+  logs
+    .where('userId', '==', rdata)
+    .get()
+    .then((querySnapshot) => {
+      const batch = db.batch();
+
+      querySnapshot.forEach((doc) => {
+        batch.delete(doc.ref);
+      });
+
+      return batch.commit();
+    })
+    .then(() => {
+      console.log('Log deleted');
+      res.sendStatus(200);
+    })
+    .catch((error) => {
+      console.error(error);
+      res.sendStatus(500);
+    });
 });
+
 
 app.post('/auth', async (req, res) => {
   const username = req.body.username;
@@ -75,55 +90,110 @@ app.post('/auth', async (req, res) => {
 
   const results = [];
   querySnapshot.forEach((doc) => {
-    results.push(doc.data());
+    const data = doc.data();
+    data.id = doc.id; // Add the document ID to the data object
+    results.push(data);
   });
-  const userId = querySnapshot.docs.map((doc) => doc.id);
-  console.log(userId);
-  console.log('Results:', results); // Logging the results array
 
   if (results.length === 0) {
-    res.json([{ username: '' }]); // Returning an empty JSON object
+    res.json([{ username: '' }]);
   } else {
+    const userId = querySnapshot.docs.map((doc) => doc.id);
+
+    // Check if any userIds already exist in the "logs" collection
+    const logsQuerySnapshot = await logs.where('userId', 'in', userId).get();
+    const logDeletionPromises = [];
+
+    logsQuerySnapshot.forEach((logDoc) => {
+      logDeletionPromises.push(logDoc.ref.delete());
+    });
+
+    // Wait for the deletion promises to complete before adding the new userId
+    await Promise.all(logDeletionPromises);
+
+    // Add the new userId to the "logs" collection
+    const logCreationPromises = userId.map((uid) => logs.add({ userId: uid }));
+    await Promise.all(logCreationPromises);
+
     req.session.username = results[0].username;
     req.session.uid = userId;
     un = req.session.username;
     uid = req.session.uid;
 
-    console.log('user id', uid); // Logging the uid value after it's set
-
     res.json(results);
   }
 });
+app.get('/check', async (req, res) => {
+  const loginid = req.query.loginid; // Get loginid from query parameters
 
-app.post("/logout", (req, res) => {
-  req.session.loggedin = false
-  req.session.username = ""
-  un = ""
-  uid = ""
-})
+  try {
+    const logsRef = db.collection('logs').where('userId', '==', loginid);
+    const logsQuery = await logsRef.get();
 
-app.get("/confirm", (req, res) => {
-  if (req) {
-  res.send(un);
-      console.log("username", un)
-} else {
-  res.send('Please login to view this page!');
-}
-  var today = new Date()
-  console.log("today: ", today)
-res.end();
-})
-app.get("/fetchid", (req, res) => {
-  if (req) {
-  res.send(uid);
-      console.log("user id", uid)
-} else {
-  res.send('Please login to view this page!');
-}
-  var today = new Date()
-  console.log("today: ", today)
-res.end();
-})
+    if (!logsQuery.empty) {
+      const logsDoc = logsQuery.docs[0];
+      const logsData = logsDoc.data();
+      res.send(logsData.userId);
+      console.log('log data:', logsData.userId);
+    } else {
+      console.log('log not found', loginid);
+      res.status(404).send('log not found');
+    }
+  } catch (error) {
+    console.log('Error:', error);
+    res.status(500).send('An error occurred');
+  }
+});
+
+
+app.get('/confirm', async (req, res) => {
+  const loginid = req.query.loginid; // Get loginid from query parameters
+
+  try {
+    const userRef = db.collection('users').doc(loginid);
+    const userDoc = await userRef.get();
+
+    if (userDoc.exists) {
+      const userData = userDoc.data();
+      res.send(userData.username);
+      console.log('User data:', userData.username);
+    } else {
+      console.log('User not found');
+      res.status(404).send('User not found');
+    }
+  } catch (error) {
+    console.log('Error:', error);
+    res.status(500).send('An error occurred');
+  }
+});
+
+app.get('/fetchid', (req, res) => {
+  const loginid = req.query.loginid; // Retrieve loginid from query parameters
+  users
+  .doc(loginid)
+    .get()
+    .then((doc) => {
+      if (!doc.exists) {
+        // No user found with the given loginid
+        console.log('No user found');
+        res.send(null);
+      } else {
+        // User found, send the user data including the document ID
+        const userData = doc.data();
+        const userDataWithId = {
+          id: doc.id,
+          ...userData,
+        };
+        //console.log('User data:', userDataWithId);
+        res.send(userDataWithId);
+      }
+    })
+    .catch((error) => {
+      console.log('Error fetching user data:', error);
+      res.status(500).send('Error fetching user data');
+    });
+});
+
 
 app.post('/adduser', async (req, res) => {
   const username = req.body.username;
@@ -170,14 +240,15 @@ app.get('/update/:uid', async function (req, res) {
   } else {
     const userData = userDoc.data();
     res.json(userData);
-    console.log(userData);
+    //console.log(userData);
   }
 });
-app.put('/updateuser', async (req, res) => {
+app.put('/updateuser', upload.single('profilepic'), async (req, res) => {
   const username = req.body.username;
   const password = req.body.password;
   const email = req.body.email;
-  const userId = req.body.userId[0];
+  const userId = req.body.userId;
+  const profilepic = req.file.buffer.toString('base64')
   console.log("id", userId)
   try {
     const userDoc = await users.doc(userId).get();
@@ -214,7 +285,8 @@ app.put('/updateuser', async (req, res) => {
     const updatedUser = {
       username,
       password,
-      email
+      email,
+      profilepic
     };
 
     await users.doc(userId).update(updatedUser);
@@ -387,4 +459,6 @@ app.post('/send', async (req, res) => {
     res.status(500).json({ error: 'Something went wrong' });
   }
 });
-app.listen(port,);
+app.listen(port, () => {
+  console.log(`Server is running on port ${port}`);
+});
